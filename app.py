@@ -85,10 +85,8 @@ def apply_dark_vibes_css() -> None:
         .sent-neg { color: #ef4444; font-weight: 700; }
         .sent-neu { color: #a3a3a3; font-weight: 700; }
 
-        /* Dataframe smoothing */
         [data-testid="stDataFrame"] { border-radius: 14px; overflow: hidden; }
 
-        /* Optional: hide Streamlit chrome */
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
         </style>
@@ -119,10 +117,6 @@ def weights_to_rows(weights: dict, prices: dict) -> list:
 # Manual Reallocation (safe + explainable)
 # ---------------------------------------
 def rebalance_to_target(weights: dict, ticker: str, target_weight: float) -> dict:
-    """
-    Set one ticker to target_weight (capped), then scale all other weights proportionally
-    so the portfolio sums to 1. Returns a new dict.
-    """
     if ticker not in weights:
         return weights
 
@@ -154,11 +148,6 @@ def rebalance_to_target(weights: dict, ticker: str, target_weight: float) -> dic
 
 
 def infer_asset_sentiment(analyses: list, ticker: str, regime: str) -> str:
-    """
-    Simple heuristic:
-    - If a headline contains the ticker, use the highest-impact label from those.
-    - Otherwise fall back to market regime.
-    """
     ticker_l = ticker.lower()
     hits = []
     for a in analyses:
@@ -183,7 +172,6 @@ def sentiment_class(label: str) -> str:
 
 
 def default_index(options: list, preferred: str) -> int:
-    """Return index of preferred in options if present, else 0."""
     try:
         return options.index(preferred)
     except ValueError:
@@ -196,17 +184,14 @@ def default_index(options: list, preferred: str) -> int:
 def main() -> None:
     st.set_page_config(page_title="News-Driven Portfolio Simulator", layout="wide")
     apply_dark_vibes_css()
-
     st_autorefresh(interval=int(REFRESH_SECONDS * 1000), key="auto_refresh")
     db.init_db()
 
-    # Editable weights persist across refreshes
+    # Initialize session state
     if "bull_weights" not in st.session_state:
         st.session_state.bull_weights = {}
     if "bear_weights" not in st.session_state:
         st.session_state.bear_weights = {}
-
-    #SENTIMENT ALERT - ROBERT*REMOVE
     if "show_sentiment_modal" not in st.session_state:
         st.session_state.show_sentiment_modal = False
     if "pending_analysis" not in st.session_state:
@@ -228,21 +213,16 @@ def main() -> None:
             {"title": "Oil climbs on geopolitical tensions", "source": "Fallback", "published": ""},
         ]
 
-    # --- Analyse headlines + store ---
+    # --- Analyze headlines + store ---
     analyses = []
     for h in headlines:
         title = clean_text(h.get("title", ""))
         source = clean_text(h.get("source", ""))
         published = clean_text(h.get("published", ""))
-
         news_id = db.insert_news(fetched_at=now, title=title, source=source, published=published)
 
         a = analyze_headline(title)
-        if (
-            a.label in ("Positive", "Negative")
-            and a.impact_score >= 0.40
-            and not st.session_state.show_sentiment_modal
-        ):
+        if a.label in ("Positive", "Negative") and a.impact_score >= 0.40 and not st.session_state.show_sentiment_modal:
             st.session_state.show_sentiment_modal = True
             st.session_state.pending_analysis = {
                 "title": title,
@@ -251,6 +231,7 @@ def main() -> None:
                 "impact_score": a.impact_score,
                 "category": a.category,
             }
+
         db.insert_sentiment(
             news_id=news_id,
             analyzed_at=now,
@@ -261,31 +242,28 @@ def main() -> None:
             category=a.category,
         )
 
-        analyses.append(
-            {
-                "title": title,
-                "source": source,
-                "published": published,
-                "label": a.label,
-                "compound": a.compound,
-                "impact_label": a.impact_label,
-                "impact_score": a.impact_score,
-                "category": a.category,
-            }
-        )
+        analyses.append({
+            "title": title,
+            "source": source,
+            "published": published,
+            "label": a.label,
+            "compound": a.compound,
+            "impact_label": a.impact_label,
+            "impact_score": a.impact_score,
+            "category": a.category,
+        })
 
-    # --- Regime decision ---
+    # --- Determine regime ---
     regime, reason = determine_regime(analyses)
     db.log_decision(now, regime, reason)
 
-        # --- Sentiment popup (human approval) ---
+    # --- Sentiment approval (using expander instead of modal) ---
     if st.session_state.show_sentiment_modal:
-        with st.modal("📢 Market Sentiment Alert"):
-            a = st.session_state.pending_analysis
-
+        a = st.session_state.pending_analysis
+        with st.expander("📢 Market Sentiment Alert (Click to review)", expanded=True):
             st.markdown(f"""
             **Headline:** {a['title']}
-
+            
             **Sentiment:** `{a['label']}`  
             **Impact:** `{a['impact_label']}` ({a['impact_score']:.2f})  
             **Category:** `{a['category']}`
@@ -293,23 +271,19 @@ def main() -> None:
             ---
             Would you like to **reallocate assets based on this sentiment?**
             """)
-
             col1, col2 = st.columns(2)
-
             with col1:
-                if st.button("✅ Yes, Allow Reallocation"):
+                if st.button("✅ Yes, Allow Reallocation", key="yes_reallocate"):
                     st.session_state.reallocate_approved = True
                     st.session_state.show_sentiment_modal = False
-                    st.rerun()
-
+                    st.experimental_rerun()
             with col2:
-                if st.button("❌ No, Ignore"):
+                if st.button("❌ No, Ignore", key="no_reallocate"):
                     st.session_state.reallocate_approved = False
                     st.session_state.show_sentiment_modal = False
-                    st.rerun()
+                    st.experimental_rerun()
 
-
-    # --- Base portfolios from rules (only initialise if empty) ---
+    # --- Base portfolios ---
     base_bull, base_bear = build_portfolios(
         bullish_universe=BULLISH_UNIVERSE,
         bearish_universe=BEARISH_UNIVERSE,
@@ -317,35 +291,30 @@ def main() -> None:
         prev_bull=st.session_state.bull_weights,
         prev_bear=st.session_state.bear_weights,
     )
-
     if not st.session_state.bull_weights:
         st.session_state.bull_weights = base_bull
     if not st.session_state.bear_weights:
         st.session_state.bear_weights = base_bear
 
-    # Prices for display only
+    # --- Prices ---
     all_tickers = sorted(set(BULLISH_UNIVERSE + BEARISH_UNIVERSE))
     prices = fetch_latest_prices(all_tickers)
 
-    # Status bar
-    st.markdown(
-        f"""
-        <div class="cm-card">
-            {pill("Simulation Only")}
-            {pill(f"Refresh: {REFRESH_SECONDS}s")}
-            {pill(f"Regime: {regime}")}
-            {pill(f"UTC: {now}")}
-            <div style="margin-top:6px; opacity:0.9;">
-                <b>Decision:</b> {reason}
-            </div>
+    # --- Status bar ---
+    st.markdown(f"""
+    <div class="cm-card">
+        {pill("Simulation Only")}
+        {pill(f"Refresh: {REFRESH_SECONDS}s")}
+        {pill(f"Regime: {regime}")}
+        {pill(f"UTC: {now}")}
+        <div style="margin-top:6px; opacity:0.9;">
+            <b>Decision:</b> {reason}
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    </div>
+    """, unsafe_allow_html=True)
 
-    # Layout
+    # --- Layout ---
     left, right = st.columns([1.25, 1])
-
     with left:
         st.subheader("Latest News (Analysed)")
         for a in analyses[:12]:
@@ -356,22 +325,19 @@ def main() -> None:
             )
 
     with right:
-        # --- Mobile-style reallocation panel ---
+        # --- Reallocation panel ---
         st.markdown('<div class="mobile-wrap">', unsafe_allow_html=True)
         st.markdown('<div class="cm-card">', unsafe_allow_html=True)
-
 
         if not st.session_state.reallocate_approved:
             st.info("Waiting for sentiment-trigger approval from news alert.")
         else:
             st.success("Sentiment-approved reallocation enabled.")
 
-        
-
         st.markdown('<p class="cm-title">Reallocate Asset Based on Sentiment</p>', unsafe_allow_html=True)
         st.markdown('<p class="cm-sub">Adjust a simulated portfolio weight and confirm.</p>', unsafe_allow_html=True)
 
-        # Defaults: Bullish + TSLA if present
+        # --- Portfolio selection ---
         portfolio_options = ["Bullish (Risk-On)", "Bearish (Risk-Reduced)"]
         default_portfolio = "Bullish (Risk-On)"
         portfolio_choice = st.selectbox(
@@ -401,32 +367,27 @@ def main() -> None:
         asset_sent = infer_asset_sentiment(analyses, ticker, regime)
         sent_cls = sentiment_class(asset_sent)
 
-        # Header row like the mock
-        st.markdown(
-            f"""
-            <div class="stock-head">
-              <div class="stock-left">
-                <div class="logo-dot">{ticker[:1]}</div>
-                <div>
-                  <p class="stock-name">{ticker}</p>
-                  <p class="stock-sub">Current share: {current_w*100:.1f}%</p>
-                </div>
-              </div>
-              <div style="text-align:right;">
-                <p class="stock-sub">Price</p>
-                <p class="stock-name">{('N/A' if price is None else round(float(price), 2))}</p>
-              </div>
+        st.markdown(f"""
+        <div class="stock-head">
+          <div class="stock-left">
+            <div class="logo-dot">{ticker[:1]}</div>
+            <div>
+              <p class="stock-name">{ticker}</p>
+              <p class="stock-sub">Current share: {current_w*100:.1f}%</p>
             </div>
-            <div class="sent-line">
-              <span style="opacity:0.78;">Sentiment:&nbsp;</span>
-              <span class="{sent_cls}">{asset_sent}</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+          </div>
+          <div style="text-align:right;">
+            <p class="stock-sub">Price</p>
+            <p class="stock-name">{('N/A' if price is None else round(float(price), 2))}</p>
+          </div>
+        </div>
+        <div class="sent-line">
+          <span style="opacity:0.78;">Sentiment:&nbsp;</span>
+          <span class="{sent_cls}">{asset_sent}</span>
+        </div>
+        """, unsafe_allow_html=True)
 
         st.markdown("---")
-
         st.caption("Adjust weight (other holdings scale automatically to keep total at 100%).")
         max_slider = min(0.20, float(MAX_WEIGHT_PER_STOCK))
         target_w = st.slider(
@@ -441,11 +402,9 @@ def main() -> None:
         st.write(f"Target: **{target_w*100:.1f}%**  (From **{current_w*100:.1f}%**)")
 
         confirm = st.button("CONFIRM REALLOCATION", type="primary")
-
         if confirm:
             updated = rebalance_to_target(active_weights, ticker, target_w)
             st.session_state[active_key] = updated
-
             db.save_portfolio_snapshot(now, regime, f"{portfolio_choice}_MANUAL", updated)
             db.log_decision(
                 now,
@@ -457,10 +416,8 @@ def main() -> None:
         st.markdown(
             "<div style='opacity:0.75; font-size:12px; margin-top:10px;'>"
             "All outputs are simulation-only and for research/educational use."
-            "</div>",
-            unsafe_allow_html=True,
+            "</div>", unsafe_allow_html=True
         )
-
         st.markdown("</div>", unsafe_allow_html=True)  # end card
         st.markdown("</div>", unsafe_allow_html=True)  # end mobile-wrap
 
