@@ -206,6 +206,14 @@ def main() -> None:
     if "bear_weights" not in st.session_state:
         st.session_state.bear_weights = {}
 
+    #SENTIMENT ALERT - ROBERT*REMOVE
+    if "show_sentiment_modal" not in st.session_state:
+        st.session_state.show_sentiment_modal = False
+    if "pending_analysis" not in st.session_state:
+        st.session_state.pending_analysis = None
+    if "reallocate_approved" not in st.session_state:
+        st.session_state.reallocate_approved = False
+
     now = utc_now_iso()
 
     st.title("News-Driven Portfolio Simulator")
@@ -230,6 +238,19 @@ def main() -> None:
         news_id = db.insert_news(fetched_at=now, title=title, source=source, published=published)
 
         a = analyze_headline(title)
+        if (
+            a.label in ("Positive", "Negative")
+            and a.impact_score >= 0.40
+            and not st.session_state.show_sentiment_modal
+        ):
+            st.session_state.show_sentiment_modal = True
+            st.session_state.pending_analysis = {
+                "title": title,
+                "label": a.label,
+                "impact_label": a.impact_label,
+                "impact_score": a.impact_score,
+                "category": a.category,
+            }
         db.insert_sentiment(
             news_id=news_id,
             analyzed_at=now,
@@ -256,6 +277,37 @@ def main() -> None:
     # --- Regime decision ---
     regime, reason = determine_regime(analyses)
     db.log_decision(now, regime, reason)
+
+        # --- Sentiment popup (human approval) ---
+    if st.session_state.show_sentiment_modal:
+        with st.modal("📢 Market Sentiment Alert"):
+            a = st.session_state.pending_analysis
+
+            st.markdown(f"""
+            **Headline:** {a['title']}
+
+            **Sentiment:** `{a['label']}`  
+            **Impact:** `{a['impact_label']}` ({a['impact_score']:.2f})  
+            **Category:** `{a['category']}`
+
+            ---
+            Would you like to **reallocate assets based on this sentiment?**
+            """)
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button("✅ Yes, Allow Reallocation"):
+                    st.session_state.reallocate_approved = True
+                    st.session_state.show_sentiment_modal = False
+                    st.rerun()
+
+            with col2:
+                if st.button("❌ No, Ignore"):
+                    st.session_state.reallocate_approved = False
+                    st.session_state.show_sentiment_modal = False
+                    st.rerun()
+
 
     # --- Base portfolios from rules (only initialise if empty) ---
     base_bull, base_bear = build_portfolios(
@@ -307,6 +359,15 @@ def main() -> None:
         # --- Mobile-style reallocation panel ---
         st.markdown('<div class="mobile-wrap">', unsafe_allow_html=True)
         st.markdown('<div class="cm-card">', unsafe_allow_html=True)
+
+
+        if not st.session_state.reallocate_approved:
+            st.info("Waiting for sentiment-trigger approval from news alert.")
+        else:
+            st.success("Sentiment-approved reallocation enabled.")
+
+        
+
         st.markdown('<p class="cm-title">Reallocate Asset Based on Sentiment</p>', unsafe_allow_html=True)
         st.markdown('<p class="cm-sub">Adjust a simulated portfolio weight and confirm.</p>', unsafe_allow_html=True)
 
