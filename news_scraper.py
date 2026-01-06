@@ -1,8 +1,6 @@
-# news_scraper.py
-# RSS headline ingestion (lightweight, reliable on school networks).
-
 import feedparser
 
+#Headline web-scraper
 def fetch_rss_headlines(feeds, limit_total=20):
     items = []
     seen = set()

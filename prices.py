@@ -1,4 +1,3 @@
-# prices.py
 # Pulls delayed/approx market prices for display only (no trading).
 import yfinance as yf
 import pandas as pd

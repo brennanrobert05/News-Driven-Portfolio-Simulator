@@ -1,8 +1,3 @@
-# allocation_engine.py
-# Option A rule-guided allocation:
-# - determine a regime from aggregated news sentiment/impact
-# - generate capped, turnover-limited allocations for each universe
-
 from config import MAX_WEIGHT_PER_STOCK, MAX_TURNOVER_PER_UPDATE
 
 def equal_weight(tickers):

@@ -1,12 +1,3 @@
-# app.py
-# Streamlit dashboard with:
-# - Dark mobile-card UI vibe
-# - RSS news ingestion
-# - Sentiment + impact analysis
-# - Rule-based Bullish/Bearish portfolios
-# - Manual reallocation feature (slider + confirm, simulation-only)
-# - Demo defaults: Bullish + TSLA selected automatically (if present)
-
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
@@ -25,9 +16,7 @@ from allocation_engine import determine_regime, build_portfolios
 from prices import fetch_latest_prices
 
 
-# ----------------------------
-# UI Styling (dark mobile vibe)
-# ----------------------------
+# UI for the app
 def apply_dark_vibes_css() -> None:
     st.markdown(
         """
@@ -85,10 +74,8 @@ def apply_dark_vibes_css() -> None:
         .sent-neg { color: #ef4444; font-weight: 700; }
         .sent-neu { color: #a3a3a3; font-weight: 700; }
 
-        /* Dataframe smoothing */
         [data-testid="stDataFrame"] { border-radius: 14px; overflow: hidden; }
 
-        /* Optional: hide Streamlit chrome */
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
         </style>
@@ -97,10 +84,12 @@ def apply_dark_vibes_css() -> None:
     )
 
 
+# Pill Style Label
 def pill(text: str) -> str:
     return f'<span class="cm-pill">{text}</span>'
 
 
+# Convert portfolio weights to rows
 def weights_to_rows(weights: dict, prices: dict) -> list:
     rows = []
     for ticker, weight in sorted(weights.items(), key=lambda x: x[1], reverse=True):
@@ -115,14 +104,8 @@ def weights_to_rows(weights: dict, prices: dict) -> list:
     return rows
 
 
-# ---------------------------------------
-# Manual Reallocation (safe + explainable)
-# ---------------------------------------
+# Rebalance portfolio by fixing one asset and scaling the rest
 def rebalance_to_target(weights: dict, ticker: str, target_weight: float) -> dict:
-    """
-    Set one ticker to target_weight (capped), then scale all other weights proportionally
-    so the portfolio sums to 1. Returns a new dict.
-    """
     if ticker not in weights:
         return weights
 
@@ -153,12 +136,8 @@ def rebalance_to_target(weights: dict, ticker: str, target_weight: float) -> dic
     return out
 
 
+# Display sentiment from related headlines or regime
 def infer_asset_sentiment(analyses: list, ticker: str, regime: str) -> str:
-    """
-    Simple heuristic:
-    - If a headline contains the ticker, use the highest-impact label from those.
-    - Otherwise fall back to market regime.
-    """
     ticker_l = ticker.lower()
     hits = []
     for a in analyses:
@@ -173,6 +152,7 @@ def infer_asset_sentiment(analyses: list, ticker: str, regime: str) -> str:
     return hits[0].get("label", f"Market: {regime}")
 
 
+# Map sentiment label to CSS class
 def sentiment_class(label: str) -> str:
     label_l = (label or "").lower()
     if "positive" in label_l:
@@ -182,17 +162,15 @@ def sentiment_class(label: str) -> str:
     return "sent-neu"
 
 
+# Safely choose a default index for selectboxes
 def default_index(options: list, preferred: str) -> int:
-    """Return index of preferred in options if present, else 0."""
     try:
         return options.index(preferred)
     except ValueError:
         return 0
 
 
-# -------------
-# Main app
-# -------------
+# Main Streamlit application entry point to display info
 def main() -> None:
     st.set_page_config(page_title="News-Driven Portfolio Simulator", layout="wide")
     apply_dark_vibes_css()
@@ -200,7 +178,6 @@ def main() -> None:
     st_autorefresh(interval=int(REFRESH_SECONDS * 1000), key="auto_refresh")
     db.init_db()
 
-    # Editable weights persist across refreshes
     if "bull_weights" not in st.session_state:
         st.session_state.bull_weights = {}
     if "bear_weights" not in st.session_state:
@@ -211,7 +188,6 @@ def main() -> None:
     st.title("News-Driven Portfolio Simulator")
     st.caption("Simulation-only: RSS news → sentiment/impact → explainable allocation rules. No real trading.")
 
-    # --- Fetch headlines ---
     headlines = fetch_rss_headlines(RSS_FEEDS, limit_total=18)
     if not headlines:
         headlines = [
@@ -220,7 +196,6 @@ def main() -> None:
             {"title": "Oil climbs on geopolitical tensions", "source": "Fallback", "published": ""},
         ]
 
-    # --- Analyse headlines + store ---
     analyses = []
     for h in headlines:
         title = clean_text(h.get("title", ""))
@@ -253,11 +228,8 @@ def main() -> None:
             }
         )
 
-    # --- Regime decision ---
     regime, reason = determine_regime(analyses)
-    #db.log_decision(now, regime, reason)
 
-    # --- Base portfolios from rules (only initialise if empty) ---
     base_bull, base_bear = build_portfolios(
         bullish_universe=BULLISH_UNIVERSE,
         bearish_universe=BEARISH_UNIVERSE,
@@ -271,11 +243,9 @@ def main() -> None:
     if not st.session_state.bear_weights:
         st.session_state.bear_weights = base_bear
 
-    # Prices for display only
     all_tickers = sorted(set(BULLISH_UNIVERSE + BEARISH_UNIVERSE))
     prices = fetch_latest_prices(all_tickers)
 
-    # Status bar
     st.markdown(
         f"""
         <div class="cm-card">
@@ -291,7 +261,6 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    # Layout
     left, right = st.columns([1.25, 1])
 
     with left:
@@ -304,19 +273,17 @@ def main() -> None:
             )
 
     with right:
-        # --- Mobile-style reallocation panel ---
         st.markdown('<div class="mobile-wrap">', unsafe_allow_html=True)
         st.markdown('<div class="cm-card">', unsafe_allow_html=True)
+
         st.markdown('<p class="cm-title">Reallocate Asset Based on Sentiment</p>', unsafe_allow_html=True)
         st.markdown('<p class="cm-sub">Adjust a simulated portfolio weight and confirm.</p>', unsafe_allow_html=True)
 
-        # Defaults: Bullish + TSLA if present
         portfolio_options = ["Bullish (Risk-On)", "Bearish (Risk-Reduced)"]
-        default_portfolio = "Bullish (Risk-On)"
         portfolio_choice = st.selectbox(
             "Portfolio",
             portfolio_options,
-            index=default_index(portfolio_options, default_portfolio),
+            index=default_index(portfolio_options, "Bullish (Risk-On)"),
         )
 
         if portfolio_choice.startswith("Bullish"):
@@ -340,7 +307,6 @@ def main() -> None:
         asset_sent = infer_asset_sentiment(analyses, ticker, regime)
         sent_cls = sentiment_class(asset_sent)
 
-        # Header row like the mock
         st.markdown(
             f"""
             <div class="stock-head">
@@ -366,7 +332,6 @@ def main() -> None:
 
         st.markdown("---")
 
-        st.caption("Adjust weight (other holdings scale automatically to keep total at 100%).")
         max_slider = min(0.20, float(MAX_WEIGHT_PER_STOCK))
         target_w = st.slider(
             f"{ticker} target weight",
@@ -377,11 +342,9 @@ def main() -> None:
             format="%.3f",
         )
 
-        st.write(f"Target: **{target_w*100:.1f}%**  (From **{current_w*100:.1f}%**)")
+        st.write(f"Target: **{target_w*100:.1f}%**  (From **{current_w*100:.1f}%)**")
 
-        confirm = st.button("CONFIRM REALLOCATION", type="primary")
-
-        if confirm:
+        if st.button("CONFIRM REALLOCATION", type="primary"):
             updated = rebalance_to_target(active_weights, ticker, target_w)
             st.session_state[active_key] = updated
 
@@ -393,15 +356,8 @@ def main() -> None:
             )
             st.success("Reallocation applied (simulation).")
 
-        st.markdown(
-            "<div style='opacity:0.75; font-size:12px; margin-top:10px;'>"
-            "All outputs are simulation-only and for research/educational use."
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("</div>", unsafe_allow_html=True)  # end card
-        st.markdown("</div>", unsafe_allow_html=True)  # end mobile-wrap
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
         st.subheader("Portfolio Weights")
         tab1, tab2 = st.tabs(["Bullish", "Bearish"])
@@ -409,8 +365,6 @@ def main() -> None:
             st.dataframe(weights_to_rows(st.session_state.bull_weights, prices), use_container_width=True, hide_index=True)
         with tab2:
             st.dataframe(weights_to_rows(st.session_state.bear_weights, prices), use_container_width=True, hide_index=True)
-
-        st.caption("Weights are capped. Prices are delayed/approx for display only.")
 
     st.divider()
     st.subheader("Decision Log")

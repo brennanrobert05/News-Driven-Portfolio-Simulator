@@ -1,8 +1,3 @@
-# sentiment_model.py
-# Option A (explainable):
-# - Sentiment: VADER compound + small transparent finance keyword nudges
-# - Impact strength: keyword-based macro/geopolitical/company boosts
-
 from dataclasses import dataclass
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
